@@ -33,7 +33,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState } = React;
+        const { useState, useCallback } = React;
 
         // --- ICONS ---
         const IconBase = ({ className, children }) => (
@@ -195,83 +195,79 @@
 
         // ─────────────────────────────────────────────────────────────────
         // CLOUDFLARE WORKER — proxy sécurisé vers l'API Anthropic
-        // Optimisations : modèle Haiku (moins cher) + prompt court + cache
         // ─────────────────────────────────────────────────────────────────
         const WORKER_URL = "https://roadmap-asp-proxy.baptiste-araujo-pro.workers.dev";
 
         // Clé de cache localStorage pour un variant donné
         function cacheKey(productName, variant) {
-            return `asp_cache__${productName}__${variant.ram}__${variant.rom}`.replace(/\s+/g, '_');
+            return `asp__${productName}__${variant.ram}__${variant.rom}`.replace(/\s+/g, '_');
         }
 
         async function fetchASPFromClaude(productName, variant) {
-            // ── 1. Vérifier le cache localStorage ────────────────────────
-            const key = cacheKey(productName, variant);
+            // 1. Vérifier le cache (valide 30 jours)
             try {
-                const cached = localStorage.getItem(key);
-                if (cached) {
-                    const { result, ts } = JSON.parse(cached);
-                    // Cache valide 30 jours
+                const raw = localStorage.getItem(cacheKey(productName, variant));
+                if (raw) {
+                    const { result, ts } = JSON.parse(raw);
                     if (Date.now() - ts < 30 * 24 * 60 * 60 * 1000) {
-                        return result + " (cache)";
+                        return { result, fromCache: true };
                     }
                 }
             } catch(_) {}
 
-            // ── 2. Prompt court = moins de tokens = moins cher ───────────
-            const prompt = `Prix ASP moyen en euros en France pour "${productName}" ${variant.ram}/${variant.rom} en 2025. Réponds uniquement avec le prix estimé (ex: "~1 200 €" ou "1 150 € – 1 300 €"). Rien d'autre.`;
-
-            // ── 3. Appel API avec modèle Haiku (80% moins cher) ──────────
+            // 2. Appel API — prompt court + modèle Haiku (80% moins cher)
             const response = await fetch(WORKER_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     model: "claude-haiku-4-5-20251001",
-                    max_tokens: 60,
+                    max_tokens: 80,
+                    system: "Tu es un assistant spécialisé en prix de smartphones. Réponds UNIQUEMENT avec le prix ASP estimé, format court (ex: \"~1 200 €\" ou \"1 100 € – 1 300 €\"). Aucune phrase, aucune explication.",
                     tools: [{ type: "web_search_20250305", name: "web_search" }],
-                    messages: [{ role: "user", content: prompt }]
+                    messages: [{
+                        role: "user",
+                        content: `Prix ASP moyen en France pour "${productName}" ${variant.ram}/${variant.rom} en 2025.`
+                    }]
                 })
             });
 
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
-                throw new Error(err?.error?.message || `HTTP ${response.status}`);
+                throw new Error(err?.error?.message || `Erreur HTTP ${response.status}`);
             }
 
             const data = await response.json();
-            const textBlock = (data.content || []).find(b => b.type === "text");
-            if (!textBlock || !textBlock.text.trim()) {
-                throw new Error("Réponse vide de l'IA");
-            }
 
-            const result = textBlock.text.trim();
+            // 3. Prendre le DERNIER bloc texte (après la recherche web)
+            //    Le modèle peut envoyer plusieurs blocs : intro → tool_use → tool_result → réponse finale
+            const textBlocks = (data.content || []).filter(b => b.type === "text" && b.text && b.text.trim());
+            if (textBlocks.length === 0) throw new Error("Réponse vide de l'IA");
+            const result = textBlocks[textBlocks.length - 1].text.trim();
 
-            // ── 4. Sauvegarder en cache pour les prochaines fois ─────────
+            // 4. Mettre en cache
             try {
-                localStorage.setItem(key, JSON.stringify({ result, ts: Date.now() }));
+                localStorage.setItem(cacheKey(productName, variant), JSON.stringify({ result, ts: Date.now() }));
             } catch(_) {}
 
-            return result;
+            return { result, fromCache: false };
         }
 
         // ─────────────────────────────────────────────────────────────────
         // MODAL PRODUIT
         // ─────────────────────────────────────────────────────────────────
         function ProductModal({ product, onClose }) {
-            const { useState: useStateLocal, useEffect, useCallback } = React;
-            const [aspData, setAspData] = useStateLocal({});
+            const [aspData, setAspData] = useState({});
 
-            // Au chargement de la modal, injecter les prix déjà en cache
-            useEffect(() => {
+            // Au chargement, afficher les prix déjà en cache sans aucun appel API
+            React.useEffect(() => {
                 const cached = {};
                 product.variants.forEach((variant, i) => {
                     try {
-                        const key = cacheKey(product.name, variant);
-                        const raw = localStorage.getItem(key);
+                        const raw = localStorage.getItem(cacheKey(product.name, variant));
                         if (raw) {
                             const { result, ts } = JSON.parse(raw);
                             if (Date.now() - ts < 30 * 24 * 60 * 60 * 1000) {
-                                cached[i] = { loading: false, result: result + " (cache)" };
+                                cached[i] = { loading: false, result, fromCache: true };
                             }
                         }
                     } catch(_) {}
@@ -280,10 +276,10 @@
             }, [product]);
 
             const fetchVariantASP = useCallback(async (variant, index) => {
-                setAspData(prev => ({ ...prev, [index]: { loading: true, error: null, result: null } }));
+                setAspData(prev => ({ ...prev, [index]: { loading: true, error: null } }));
                 try {
-                    const result = await fetchASPFromClaude(product.name, variant);
-                    setAspData(prev => ({ ...prev, [index]: { loading: false, result } }));
+                    const { result, fromCache } = await fetchASPFromClaude(product.name, variant);
+                    setAspData(prev => ({ ...prev, [index]: { loading: false, result, fromCache } }));
                 } catch (err) {
                     console.error("Erreur ASP :", err);
                     setAspData(prev => ({ ...prev, [index]: { loading: false, error: err.message || "Erreur IA" } }));
@@ -378,11 +374,9 @@
                                                                 </div>
                                                             ) : asp.result ? (
                                                                 <div className="flex justify-end items-center gap-1.5">
-                                                                    <span className="font-bold text-green-600">
-                                                                        {asp.result.replace(" (cache)", "")}
-                                                                    </span>
-                                                                    {asp.result.includes("(cache)") && (
-                                                                        <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">cache</span>
+                                                                    <span className="font-bold text-green-600">{asp.result}</span>
+                                                                    {asp.fromCache && (
+                                                                        <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full" title="Prix issu du cache local (30 jours)">cache</span>
                                                                     )}
                                                                 </div>
                                                             ) : asp.error ? (
