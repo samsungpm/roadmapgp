@@ -200,17 +200,11 @@
         // ─────────────────────────────────────────────────────────────────
         const ANTHROPIC_API_KEY = "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";
 
-        async function fetchASPFromClaude(productName, variant) {
-            const prompt = `Recherche sur le web le prix de vente moyen constaté (Average Selling Price) en euros pour le smartphone "${productName}" version ${variant.ram} RAM / ${variant.rom} stockage, en France en 2025-2026.
-Réponds UNIQUEMENT avec une estimation très courte du prix (exemples : "~1 200 €", "1 150 € – 1 300 €"). Pas d'explication, pas de justification.`;
-
-            const response = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "anthropic-dangerous-direct-browser-access": "true"
+async function fetchASPFromClaude(productName, variant) {
+    ...
+    const response = await fetch("https://roadmap-asp-proxy.baptiste-araujo-pro.workers.dev", {
+        headers: {
+            "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
                     model: "claude-sonnet-4-20250514",
