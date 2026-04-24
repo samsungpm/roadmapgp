@@ -213,13 +213,6 @@ Réponds UNIQUEMENT avec une estimation très courte du prix (exemples : "~1 200
                     messages: [{ role: "user", content: prompt }]
                 })
             });
-                body: JSON.stringify({
-                    model: "claude-sonnet-4-20250514",
-                    max_tokens: 200,
-                    tools: [{ type: "web_search_20250305", name: "web_search" }],
-                    messages: [{ role: "user", content: prompt }]
-                })
-            });
 
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
