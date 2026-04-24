@@ -194,18 +194,25 @@
         const months = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
 
         // ─────────────────────────────────────────────────────────────────
-        // ANTHROPIC API — appel direct (GitHub Pages / site statique)
-        // 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
-        //     La clé est visible dans le code source : usage interne uniquement.
+        // CLOUDFLARE WORKER — proxy sécurisé vers l'API Anthropic
+        // La clé API est stockée côté Cloudflare, jamais dans ce fichier.
         // ─────────────────────────────────────────────────────────────────
-        const ANTHROPIC_API_KEY = "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";
+        const WORKER_URL = "https://roadmap-asp-proxy.baptiste-araujo-pro.workers.dev";
 
-async function fetchASPFromClaude(productName, variant) {
-    ...
-    const response = await fetch("https://roadmap-asp-proxy.baptiste-araujo-pro.workers.dev", {
-        headers: {
-            "Content-Type": "application/json",
-                },
+        async function fetchASPFromClaude(productName, variant) {
+            const prompt = `Recherche sur le web le prix de vente moyen constaté (Average Selling Price) en euros pour le smartphone "${productName}" version ${variant.ram} RAM / ${variant.rom} stockage, en France en 2025-2026.
+Réponds UNIQUEMENT avec une estimation très courte du prix (exemples : "~1 200 €", "1 150 € – 1 300 €"). Pas d'explication, pas de justification.`;
+
+            const response = await fetch(WORKER_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: "claude-sonnet-4-20250514",
+                    max_tokens: 200,
+                    tools: [{ type: "web_search_20250305", name: "web_search" }],
+                    messages: [{ role: "user", content: prompt }]
+                })
+            });
                 body: JSON.stringify({
                     model: "claude-sonnet-4-20250514",
                     max_tokens: 200,
